@@ -80,11 +80,11 @@ function fetchDeviceInfoFromTableAndConfigure() {
 		device.channel(`Channel 1`).SetLedLimit(GoveeDeviceInfo.ledCount);
 		device.SetLedLimit(GoveeDeviceInfo.ledCount);
 	}else{
-		device.log(`SKU (${controller.sku}) not found on the library, using 30 LEDs!`);
+		device.log(`SKU (${controller.sku}) not found on the library, using 120 LEDs!`);
 		device.setName(`Govee: ${controller.sku}`);
-		device.addChannel(`Channel 1`, 30);
-		device.channel(`Channel 1`).SetLedLimit(30);
-		device.SetLedLimit(30);
+		device.addChannel(`Channel 1`, 120);
+		device.channel(`Channel 1`).SetLedLimit(120);
+		device.SetLedLimit(120);
 	}
 
 }
