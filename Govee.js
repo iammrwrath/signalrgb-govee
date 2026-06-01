@@ -146,10 +146,10 @@ export function DiscoveryService() {
 
 	this.clearSockets = function() {
 		if(Date.now() - this.activeSocketTimer > 10000 && this.activeSockets.size > 0) {
-			service.log("Nuking Active Cache Sockets.");
+			service.log("Clearing inactive devices Sockets. All cached devices should have responded by now if they were online.");
 
 			for(const [key, value] of this.activeSockets.entries()){
-				service.log(`Nuking Socket for IP: [${key}]`);
+				service.log(`Clearing Socket for IP: [${key}]`);
 				value.stop();
 				this.activeSockets.delete(key);
 				//Clear would be more efficient here, however it doesn't kill the socket instantly.
@@ -744,11 +744,11 @@ class UdpSocketServer{
 
 	onConnection(){
 		this.log('Connected to remote socket!');
-		this.log("Remote Address:");
+		this.log("Socket information:");
 		this.log(this.server.remoteAddress(), {pretty: true});
 
 		if(this.isDiscoveryServer) {
-			this.log("Sending Check to socket");
+			this.log("Sending Check to socket and waiting for device to respond...");
 
 			const bytesWritten = this.server.send(JSON.stringify({
 				msg: {
