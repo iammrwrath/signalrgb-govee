@@ -1420,7 +1420,7 @@ const GoveeDeviceLibrary = {
 		state: 1,
 		supportRazer: true,
 		supportDreamView: true,
-		ledCount: 7
+		ledCount: 420
 	},
 	H6167: {
 		name: "RGBIC TV Light Bars",
