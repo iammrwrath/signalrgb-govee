@@ -616,6 +616,9 @@ class GoveeProtocol {
 	SendEncodedPacket(packet){
 		const command = base64.Encode(packet);
 
+		// Debug
+		//device.log(`[${protocolSelect}] segments=${(packet.length - 7)/3 | 0} raw packet bytes=${packet.length}`);
+
 		const now = Date.now();
 
 		if (now - this.lastPacket > 1000) {
@@ -670,7 +673,7 @@ class GoveeProtocol {
 				packet = this.createRazerPacketV1(RGBData);
 				this.SendEncodedPacket(packet);
 				break;
-			case "RazerV1":
+			case "RazerV2":
 				packet = this.createRazerPacketV2(RGBData);
 				this.SendEncodedPacket(packet);
 				break;
@@ -1419,8 +1422,8 @@ const GoveeDeviceLibrary = {
 		sku: "H61D5",
 		state: 1,
 		supportRazer: true,
-		supportDreamView: true,
-		ledCount: 420
+		ledCount: 68,
+		hasVariableLedCount: true
 	},
 	H6167: {
 		name: "RGBIC TV Light Bars",
