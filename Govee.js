@@ -1140,7 +1140,7 @@ const GoveeDeviceLibrary = {
 		state: 1,
 		supportRazer: true,
 		supportDreamView: true,
-		ledCount: 15
+		ledCount: 20
 	},
 	H619B: {
 		name: "7.5m RGBIC Pro Strip Lights",
@@ -1439,6 +1439,15 @@ const GoveeDeviceLibrary = {
 		supportRazer: true,
 		supportDreamView: true,
 		ledCount: 10
+	},
+	H70BC: {
+		name: "Netflix Curtain Lights",
+		deviceImage: "https://assets.signalrgb.com/devices/brands/govee/wifi/h70b1.png",
+		sku: "H70BC",
+		state: 1,
+		supportRazer: true,
+		supportDreamView: true,
+		ledCount: 400 // 20 strands of 20. One channel, so the component decides the layout.
 	},
 	H61D5: {
 		name: "RGBIC Neon Lights 2",
