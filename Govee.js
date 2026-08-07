@@ -27,6 +27,12 @@ export function ControllableParameters() {
 /** @type {GoveeProtocol} */
 let govee;
 
+const UnknownSkuLedCount = 120;
+
+/** Channels this device renders through, in the order their colors go on the wire.
+ * @type {{name: string, ledCount: number}[]} */
+let channels = [];
+
 export function Initialize(){
 	device.addFeature("base64");
 
@@ -73,20 +79,44 @@ export function Shutdown(SystemSuspending){
 }
 
 function fetchDeviceInfoFromTableAndConfigure() {
-	if(GoveeDeviceLibrary.hasOwnProperty(controller.sku)){
-		const GoveeDeviceInfo = GoveeDeviceLibrary[controller.sku];
-		device.setName(`Govee ${GoveeDeviceInfo.sku} - ${GoveeDeviceInfo.name}`);
-		device.addChannel(`Channel 1`, GoveeDeviceInfo.ledCount);
-		device.channel(`Channel 1`).SetLedLimit(GoveeDeviceInfo.ledCount);
-		device.SetLedLimit(GoveeDeviceInfo.ledCount);
-	}else{
-		device.log(`SKU (${controller.sku}) not found on the library, using 120 LEDs!`);
+	if(!GoveeDeviceLibrary.hasOwnProperty(controller.sku)){
+		device.log(`SKU (${controller.sku}) not found on the library, using ${UnknownSkuLedCount} LEDs!`);
 		device.setName(`Govee: ${controller.sku}`);
-		device.addChannel(`Channel 1`, 120);
-		device.channel(`Channel 1`).SetLedLimit(120);
-		device.SetLedLimit(120);
+		ConfigureChannels([{ name: `Channel 1`, ledCount: UnknownSkuLedCount }]);
+
+		return;
 	}
 
+	const GoveeDeviceInfo = GoveeDeviceLibrary[controller.sku];
+	device.setName(`Govee ${GoveeDeviceInfo.sku} - ${GoveeDeviceInfo.name}`);
+	ConfigureChannels(GetChannelLayout(GoveeDeviceInfo));
+}
+
+function GetChannelLayout(GoveeDeviceInfo){
+	// Devices built from multiple segments (paired light bars and the like) get a channel
+	// each, so every segment can be given its own component.
+	if(GoveeDeviceInfo.usesSubDevices){
+		return GoveeDeviceInfo.subdevices.map((subdevice, index) => ({
+			name: `Channel ${index + 1}`,
+			ledCount: subdevice.ledCount
+		}));
+	}
+
+	return [{ name: `Channel 1`, ledCount: GoveeDeviceInfo.ledCount }];
+}
+
+function ConfigureChannels(layout){
+	channels = layout;
+
+	let totalLedCount = 0;
+
+	for(const channel of channels){
+		device.addChannel(channel.name, channel.ledCount);
+		device.channel(channel.name).SetLedLimit(channel.ledCount);
+		totalLedCount += channel.ledCount;
+	}
+
+	device.SetLedLimit(totalLedCount);
 }
 
 // -------------------------------------------<( Discovery Service )>--------------------------------------------------
@@ -601,23 +631,35 @@ class GoveeProtocol {
 		}));
 	}
 
-	SendRGB(overrideColor) {
-		const ChannelLedCount = device.channel(`Channel 1`).LedCount();
-		const componentChannel = device.channel(`Channel 1`);
+	GetChannelRGB(channelName, overrideColor){
+		const componentChannel = device.channel(channelName);
+		const ChannelLedCount = componentChannel.LedCount();
 
+		if(overrideColor) {
+			return device.createColorArray(overrideColor, ChannelLedCount, "Inline");
+		}
+
+		if(LightingMode === "Forced"){
+			return device.createColorArray(forcedColor, ChannelLedCount, "Inline");
+		}
+
+		if(componentChannel.shouldPulseColors()){
+			const pulseColor = device.getChannelPulseColor(channelName);
+			const pulseCount = componentChannel.LedLimit();
+
+			return device.createColorArray(pulseColor, pulseCount, "Inline");
+		}
+
+		return componentChannel.getColors("Inline");
+	}
+
+	SendRGB(overrideColor) {
 		let RGBData = [];
 		let packet  = [];
 
-		if(overrideColor) {
-			RGBData = device.createColorArray(overrideColor, ChannelLedCount, "Inline");
-		}else if(LightingMode === "Forced"){
-			RGBData = device.createColorArray(forcedColor, ChannelLedCount, "Inline");
-		}else if(componentChannel.shouldPulseColors()){
-			const pulseColor = device.getChannelPulseColor(`Channel 1`);
-			const pulseCount = device.channel(`Channel 1`).LedLimit();
-			RGBData = device.createColorArray(pulseColor, pulseCount, "Inline");
-		}else{
-			RGBData = device.channel(`Channel 1`).getColors("Inline");
+		// Segments go on the wire in channel order, matching how the device chains them.
+		for(const channel of channels){
+			RGBData = RGBData.concat(this.GetChannelRGB(channel.name, overrideColor));
 		}
 
 		switch (protocolSelect) {
@@ -834,7 +876,8 @@ class IPCache{
 }
 
 // eslint-disable-next-line max-len
-/** @typedef { {name: string, deviceImage: string, sku: string, state: number, supportRazer: boolean, supportDreamView: boolean, ledCount: number, hasVariableLedCount?: boolean } } GoveeDevice */
+/** @typedef { {name: string, ledCount: number, size: number[], ledNames: string[], ledPositions: number[][] } } GoveeSubdevice */
+/** @typedef { {name: string, deviceImage: string, sku: string, state: number, supportRazer: boolean, supportDreamView: boolean, ledCount: number, hasVariableLedCount?: boolean, usesSubDevices?: boolean, subdevices?: GoveeSubdevice[] } } GoveeDevice */
 /** @type {Object.<string, GoveeDevice>} */
 const GoveeDeviceLibrary = {
 	H6061: {
