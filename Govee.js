@@ -20,7 +20,7 @@ export function ControllableParameters() {
 		{property:"LightingMode", group:"lighting", label:"Lighting Mode", description: "Determines where the device's RGB comes from. Canvas will pull from the active Effect, while Forced will override it to a specific color", type:"combobox", values:["Canvas", "Forced"], default:"Canvas"},
 		{property:"forcedColor", group:"lighting", label:"Forced Color", description: "The color used when 'Forced' Lighting Mode is enabled", min:"0", max:"360", type:"color", default:"#009bde"},
 		{property:"TurnOffOnShutdown", group:"settings", label:"Turn off on unlink process", description: "This turns off the device during the unlink/disabling of the device process or shutdown of the app", type:"boolean", default:"false"},
-		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. (Not all protocols works on a device)", type:"combobox", values:["DreamviewV1", "DreamviewV2", "RazerV1", "RazerV2", "Static"], default:"DreamviewV1"},
+		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "DreamviewV1", "DreamviewV2", "RazerV1", "RazerV2", "Static"], default:"Auto"},
 	];
 }
 
@@ -32,6 +32,10 @@ const UnknownSkuLedCount = 120;
 /** Channels this device renders through, in the order their colors go on the wire.
  * @type {{name: string, ledCount: number}[]} */
 let channels = [];
+
+/** Protocol used while protocolSelect is left on "Auto". Resolved per device from the
+ * library, so a device only ever gets a protocol it's known to support. */
+let autoProtocol = "Static";
 
 export function Initialize(){
 	device.addFeature("base64");
@@ -82,6 +86,8 @@ function fetchDeviceInfoFromTableAndConfigure() {
 	if(!GoveeDeviceLibrary.hasOwnProperty(controller.sku)){
 		device.log(`SKU (${controller.sku}) not found on the library, using ${UnknownSkuLedCount} LEDs!`);
 		device.setName(`Govee: ${controller.sku}`);
+		// An unrecognised device gets the one protocol every Govee light accepts.
+		autoProtocol = "Static";
 		ConfigureChannels([{ name: `Channel 1`, ledCount: UnknownSkuLedCount }]);
 
 		return;
@@ -89,7 +95,22 @@ function fetchDeviceInfoFromTableAndConfigure() {
 
 	const GoveeDeviceInfo = GoveeDeviceLibrary[controller.sku];
 	device.setName(`Govee ${GoveeDeviceInfo.sku} - ${GoveeDeviceInfo.name}`);
+	autoProtocol = GetAutoProtocol(GoveeDeviceInfo);
+	device.log(`Auto protocol for ${GoveeDeviceInfo.sku} resolved to ${autoProtocol}.`);
 	ConfigureChannels(GetChannelLayout(GoveeDeviceInfo));
+}
+
+function GetAutoProtocol(GoveeDeviceInfo){
+	if(GoveeDeviceInfo.supportDreamView){
+		return "DreamviewV1";
+	}
+
+	if(GoveeDeviceInfo.supportRazer){
+		return "RazerV1";
+	}
+
+	// Everything else only ever responded to plain colorwc commands.
+	return "Static";
 }
 
 function GetChannelLayout(GoveeDeviceInfo){
@@ -662,7 +683,7 @@ class GoveeProtocol {
 			RGBData = RGBData.concat(this.GetChannelRGB(channel.name, overrideColor));
 		}
 
-		switch (protocolSelect) {
+		switch (protocolSelect === "Auto" ? autoProtocol : protocolSelect) {
 			case "DreamviewV1":
 				packet = this.createDreamViewPacketV1(RGBData);
 				this.SendEncodedPacket(packet);
