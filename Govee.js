@@ -176,79 +176,33 @@ export function DiscoveryService() {
 	};
 
 	this.Discovered = function(value) {
+		const response	= JSON.parse(value.response);
 
-		//console.log(value)
-
-		// Check if the device is already in the cache before doing any work
-		if(!this.cache.Has(value.id)){
-
-			const response	= JSON.parse(value.response);
-
-			// Check if the response packet has the "scan" response from Govee
-			if(response.msg.cmd != "scan"){
-				return;
-			}
-
-			service.log(`Potential Govee device ${response.msg.data.sku} found at ${value.ip}`);
-
-			// Check if the response packet has the ip field in the response from Govee
-			const isValid = response.msg.data.hasOwnProperty("ip");
-
-			if(!isValid){
-				service.log(`Potential Govee device ${response.msg.data.sku} found at ${value.ip} discarded since it's missing an IP field. If this is a Matter device, is not supported yet.`);
-				service.log(response.msg.data)
-				return;
-			}
-
-			service.log(`Govee device ${response.msg.data.sku} discovered!`);
-			//service.log(value);
-			this.CreateControllerDevice(value);
-
-		}else if (this.cache.Has(value.id) && value.ip !== this.cache.Get(value.id).ip) {
-			service.log(`Updating Govee device found at ${value.ip}`);
-			const cachedController = this.cache.Get(value.id);
-			const controller = service.getController(cachedController.id);
-			if(controller) {
-				controller.updateWithValue(value);
-			}
+		// Check if the response packet has the "scan" response from Govee
+		if(response.msg.cmd != "scan"){
+			return;
 		}
+
+		// Check if the response packet has the ip field in the response from Govee
+		const isValid = response.msg.data.hasOwnProperty("ip");
+
+		if(!isValid){
+			service.log(`Potential Govee device ${response.msg.data.sku} found at ${value.ip} discarded since it's missing an IP field. If this is a Matter device, is not supported yet.`);
+			service.log(response.msg.data)
+			return;
+		}
+
+		// Only log the find once, but always fall through to CreateControllerDevice so a
+		// cached device whose controller went missing is rebuilt on the next scan.
+		if(!this.cache.Has(value.id)){
+			service.log(`Govee device ${response.msg.data.sku} discovered at ${value.ip}!`);
+		}
+
+		this.CreateControllerDevice(value);
 	};
 
 	this.forceDiscovery = function(value) {
-
-		console.log(value)
-		
-		// Check if the device is already in the cache before doing any work
-		if(!this.cache.Has(value.id)){
-
-			const response	= JSON.parse(value.response);
-
-			// Check if the response packet has the "scan" response from Govee
-			if(response.msg.cmd != "scan"){
-				return;
-			}
-
-			service.log(`Potential Govee device ${response.msg.data.sku} found at ${value.ip}`);
-
-			// Check if the response packet has the ip field in the response from Govee
-			const isValid = response.msg.data.hasOwnProperty("ip");
-
-			if(!isValid){
-				service.log(`Potential Govee device ${response.msg.data.sku} found at ${value.ip} discarded since it's missing an IP field. If this is a Matter device, is not supported yet.`);
-				service.log(response.msg.data)
-				return;
-			}
-
-			service.log(`Govee device ${response.msg.data.sku} discovered!`);
-			this.CreateControllerDevice(value);
-		}else if (this.cache.Has(value.id) && value.ip !== this.cache.Get(value.id).ip) {
-			service.log(`Updating Govee device found at ${value.ip}`);
-			const cachedController = this.cache.Get(value.id);
-			const controller = service.getController(cachedController.id);
-			if(controller) {
-				controller.updateWithValue(value);
-			}
-		}
+		this.Discovered(value);
 	};
 
 	this.purgeIPCache = function() {
@@ -281,7 +235,7 @@ export function DiscoveryService() {
 	this.remove = function(controllerObj = false){
 
 		if (controllerObj) {
-			service.log(`Stopping TCP Socket for ${controllerObj.ip}`);
+			service.log(`Stopping UDP Socket for ${controllerObj.ip}`);
 			const udpSocket = this.getSocket(controllerObj.ip);
 			if(udpSocket){
 				udpSocket.stop();
@@ -311,29 +265,28 @@ export function DiscoveryService() {
 	};
 
 	this.CreateControllerDevice = function(value){
+		// Cache entries are keyed by their own id, so going through the cache to find the
+		// controller id is a round trip to the same value. Ask the service directly.
+		const controller = service.getController(value.id);
 
-		if(this.cache.Has(value.id)){
-			service.log("Device found in cache, updating controller!")
-			const cachedController = this.cache.Get(value.id)
-			const controller = service.getController(cachedController.id);
-			
-			if(controller === undefined){
-				service.log("Device controller not found, creating controller!")
-				service.addController(new GoveeController(value));
-			}else{
-				controller.updateWithValue(value);
-			}
-		} else {
-			service.log("Device not found in cache, creating controller!")
+		if(controller === undefined){
+			service.log(`No controller found for ${value.id}, creating one!`);
 			service.addController(new GoveeController(value));
+		}else{
+			controller.updateWithValue(value);
 		}
 	};
 
 	this.link = function(controllerObj){
 		service.log(`Linking controller: ${controllerObj.id} - Paired: ${controllerObj.paired} `);
 
-		const cachedController = this.cache.Get(controllerObj.id)
-		const controller = service.getController(cachedController.id);
+		const controller = service.getController(controllerObj.id);
+
+		if(controller === undefined){
+			service.log(`Cannot link ${controllerObj.id}, no controller exists for it.`);
+
+			return;
+		}
 
 		controller.paired = true;
 
@@ -350,15 +303,21 @@ export function DiscoveryService() {
 	this.unlink = function(controllerObj) {
 		service.log(`Unlinking controller: ${JSON.stringify(controllerObj)}`);
 
-		service.log(`Stopping TCP Socket for ${controllerObj.id}`);
-		const tcpSocket = this.getSocket(controllerObj.id);
-		if(tcpSocket){
-			tcpSocket.stop();
-			this.activeSockets.delete(controllerObj.id);
+		const controller = service.getController(controllerObj.id);
+
+		if(controller === undefined){
+			service.log(`Cannot unlink ${controllerObj.id}, no controller exists for it.`);
+
+			return;
 		}
 
-		const cachedController = this.cache.Get(controllerObj.id)
-		const controller = service.getController(cachedController.id);
+		// Sockets are keyed by IP, not by controller id.
+		service.log(`Stopping UDP Socket for ${controllerObj.ip}`);
+		const udpSocket = this.getSocket(controllerObj.ip);
+		if(udpSocket){
+			udpSocket.stop();
+			this.activeSockets.delete(controllerObj.ip);
+		}
 
 		controller.paired = false;
 
@@ -487,6 +446,7 @@ class GoveeController{
 		if(!this.initialized){
 			this.initialized = true;
 			service.updateController(this);
+			service.announceController(this);
 		}
 	}
 
@@ -1374,7 +1334,7 @@ const GoveeDeviceLibrary = {
 	H6079: {
 		name: "RGBICWW Floor Lamp Pro",
 		deviceImage: "https://assets.signalrgb.com/devices/brands/govee/wifi/h6079.png",
-		SKU: "H6079",
+		sku: "H6079",
 		state: 1,
 		supportRazer: true,
 		supportDreamView: true,
@@ -1422,6 +1382,7 @@ const GoveeDeviceLibrary = {
 		sku: "H61D5",
 		state: 1,
 		supportRazer: true,
+		supportDreamView: true,
 		ledCount: 68,
 		hasVariableLedCount: true
 	},
@@ -1559,14 +1520,5 @@ const GoveeDeviceLibrary = {
 		supportRazer: false,
 		supportDreamView: true,
 		ledCount: 20
-	},
-	H619A: {
-		name: "5m RGBIC LED Strip Light with Cover",
-		deviceImage: "https://assets.signalrgb.com/devices/brands/govee/wifi/h619a.png",
-		sku: "H619A",
-		state: 1,
-		supportRazer: true,
-		supportDreamView: true,
-		ledCount: 30
 	},
 };
