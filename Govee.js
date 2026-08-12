@@ -41,8 +41,13 @@ let autoProtocol = "Static";
  * does not mean Render is running, and the two failure modes look identical on the device. */
 let loggedFirstFrame = false;
 
+/** Frames since Initialize. Logged periodically so a render loop that never starts, or one
+ * that starts and later stops, is visible instead of silent. */
+let renderCount = 0;
+
 export function Initialize(){
 	loggedFirstFrame = false;
+	renderCount = 0;
 	device.addFeature("base64");
 
 	device.setName(controller.sku);
@@ -71,6 +76,13 @@ export function Initialize(){
 }
 
 export function Render(){
+	// Roughly every ten seconds at the default frame rate.
+	if(renderCount % 300 === 0){
+		device.log(`Render tick ${renderCount}.`);
+	}
+
+	renderCount++;
+
 	govee.SendRGB();
 	device.pause(10);
 }
