@@ -72,7 +72,7 @@ export function Initialize(){
 	govee = new GoveeProtocol(controller.ip, controller.supportDreamView, controller.supportRazer);
 
 	govee.setDeviceState(true);
-	govee.SetRazerMode(true);
+	govee.SetStreamingMode(true);
 }
 
 export function Render(){
@@ -90,7 +90,7 @@ export function Render(){
 	// opened, so assert it on the opening frames and then keep it topped up every few
 	// seconds. The command is idempotent and small.
 	if(renderCount < 5 || renderCount % 150 === 0){
-		govee.SetRazerMode(true);
+		govee.SetStreamingMode(true);
 	}
 
 	renderCount++;
@@ -102,7 +102,7 @@ export function Render(){
 export function Shutdown(SystemSuspending){
 	// Hand control back to the device first. Anything streamed at it before this point is
 	// discarded along with the stream, which is why the shutdown color never stuck.
-	govee.SetRazerMode(false);
+	govee.SetStreamingMode(false);
 
 	if(TurnOffOnShutdown){
 		govee.setDeviceState(false);
@@ -598,7 +598,12 @@ class GoveeProtocol {
 		}));
 	}
 
-	SetRazerMode(enable){
+	/** Hands control of the device to the network, or gives it back. Nothing to do with the
+	 * Razer protocol despite the JSON envelope -- "razer" is simply how the LAN API carries
+	 * any encoded packet, colour frames included. The payloads decode to
+	 * BB 00 01 B1 01 0A and BB 00 01 B1 00 0B: command 0xB1, enable and disable. Colour
+	 * frames (0xB0) are ignored unless this has been enabled. */
+	SetStreamingMode(enable){
 		UDPServer.send(JSON.stringify({msg:{cmd:"razer", data:{pt:enable?"uwABsQEK":"uwABsQAL"}}}));
 	}
 
