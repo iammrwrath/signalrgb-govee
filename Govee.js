@@ -37,7 +37,12 @@ let channels = [];
  * library, so a device only ever gets a protocol it's known to support. */
 let autoProtocol = "Static";
 
+/** Reset per Initialize so the first outbound frame is logged once. Initialize completing
+ * does not mean Render is running, and the two failure modes look identical on the device. */
+let loggedFirstFrame = false;
+
 export function Initialize(){
+	loggedFirstFrame = false;
 	device.addFeature("base64");
 
 	device.setName(controller.sku);
@@ -636,6 +641,11 @@ class GoveeProtocol {
 
 	SendEncodedPacket(packet){
 		const command = base64.Encode(packet);
+
+		if(!loggedFirstFrame){
+			loggedFirstFrame = true;
+			device.log(`Streaming started: ${packet.length} byte frame over ${channels.length} channel(s).`);
+		}
 
 		// Debug
 		//device.log(`[${protocolSelect}] segments=${(packet.length - 7)/3 | 0} raw packet bytes=${packet.length}`);
