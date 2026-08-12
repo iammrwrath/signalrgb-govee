@@ -45,9 +45,14 @@ let loggedFirstFrame = false;
  * that starts and later stops, is visible instead of silent. */
 let renderCount = 0;
 
+/** Whether the socket has been seen connected since Initialize, so the setup commands can be
+ * asserted once it actually is. */
+let sawConnectedSocket = false;
+
 export function Initialize(){
 	loggedFirstFrame = false;
 	renderCount = 0;
+	sawConnectedSocket = false;
 	device.addFeature("base64");
 
 	device.setName(controller.sku);
@@ -79,6 +84,16 @@ export function Render(){
 	// Roughly every ten seconds at the default frame rate.
 	if(renderCount % 300 === 0){
 		device.log(`Render tick ${renderCount}.`);
+	}
+
+	// Initialize starts the socket and then sends the setup commands straight away, before
+	// connect() has reported back, so they can go out on a socket that is not ready yet.
+	// Watch for the connection landing instead and assert them then. A flag check per frame,
+	// no blocking, and it works no matter how long the socket takes.
+	if(!sawConnectedSocket && UDPServer !== undefined && UDPServer.connected){
+		sawConnectedSocket = true;
+		govee.setDeviceState(true);
+		govee.SetStreamingMode(true);
 	}
 
 	// Stream mode is handed to us by one unacknowledged datagram in Initialize. Lose it and
@@ -767,6 +782,7 @@ class UdpSocketServer{
 		this.broadcastPort = args?.broadcastPort ?? 4001;
 		this.ipToConnectTo = args?.ip ?? "239.255.255.250";
 		this.isDiscoveryServer = args?.isDiscoveryServer ?? false;
+		this.connected = false;
 
 		this.log = (msg) => { this.isDiscoveryServer ? service.log(msg) : device.log(msg); };
 
@@ -809,6 +825,8 @@ class UdpSocketServer{
 	};
 
 	stop(){
+		this.connected = false;
+
 		if(this.server) {
 			this.server.disconnect();
 			this.server.close();
@@ -816,6 +834,7 @@ class UdpSocketServer{
 	}
 
 	onConnection(){
+		this.connected = true;
 		this.log('Connected to remote socket!');
 		this.log("Socket information:");
 		this.log(this.server.remoteAddress(), {pretty: true});
