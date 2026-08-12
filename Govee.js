@@ -71,15 +71,25 @@ export function Render(){
 }
 
 export function Shutdown(SystemSuspending){
-	const color = SystemSuspending ? "#000000" : shutdownColor;
-	govee.SendRGB(color);
-	device.pause(10);
-
+	// Hand control back to the device first. Anything streamed at it before this point is
+	// discarded along with the stream, which is why the shutdown color never stuck.
 	govee.SetRazerMode(false);
 
 	if(TurnOffOnShutdown){
 		govee.setDeviceState(false);
+
+		return;
 	}
+
+	// colorwc sets the device's own state, so it survives us going away. Everything here
+	// avoids touching device.* on purpose: the device is being torn down around us, so the
+	// color is parsed by hand and this skips SetStaticColor's render-loop pause.
+	const color = SystemSuspending ? "#000000" : shutdownColor;
+	govee.SendStaticColor([
+		parseInt(color.substr(1, 2), 16),
+		parseInt(color.substr(3, 2), 16),
+		parseInt(color.substr(5, 2), 16)
+	]);
 }
 
 function fetchDeviceInfoFromTableAndConfigure() {
@@ -603,7 +613,7 @@ class GoveeProtocol {
 		return fullPacket;
 	}
 
-	SetStaticColor(RGBData){
+	SendStaticColor(RGBData){
 		UDPServer.send(JSON.stringify({
 			msg: {
 				cmd: "colorwc",
@@ -613,6 +623,13 @@ class GoveeProtocol {
 				}
 			}
 		}));
+	}
+
+	SetStaticColor(RGBData){
+		this.SendStaticColor(RGBData);
+
+		// colorwc changes device state rather than streaming a frame, so the render loop has
+		// to throttle itself or it floods the device. Only wanted on the render path.
 		device.pause(100);
 	}
 
