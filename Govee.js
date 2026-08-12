@@ -84,9 +84,12 @@ export function Render(){
 	// Stream mode is handed to us by one unacknowledged datagram in Initialize. Lose it and
 	// the device ignores every frame we send, holding whatever state it already had -- which
 	// looks identical to working from this side, and previously needed a manual disable and
-	// re-enable to recover. Re-asserting costs one small packet every few seconds and makes
-	// a dropped enable heal itself.
-	if(renderCount % 150 === 0){
+	// re-enable to recover.
+	//
+	// The riskiest moment is the start of the stream, when the socket has only just been
+	// opened, so assert it on the opening frames and then keep it topped up every few
+	// seconds. The command is idempotent and small.
+	if(renderCount < 5 || renderCount % 150 === 0){
 		govee.SetRazerMode(true);
 	}
 
