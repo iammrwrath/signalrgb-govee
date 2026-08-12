@@ -20,7 +20,7 @@ export function ControllableParameters() {
 		{property:"LightingMode", group:"lighting", label:"Lighting Mode", description: "Determines where the device's RGB comes from. Canvas will pull from the active Effect, while Forced will override it to a specific color", type:"combobox", values:["Canvas", "Forced"], default:"Canvas"},
 		{property:"forcedColor", group:"lighting", label:"Forced Color", description: "The color used when 'Forced' Lighting Mode is enabled", min:"0", max:"360", type:"color", default:"#009bde"},
 		{property:"TurnOffOnShutdown", group:"settings", label:"Turn off on unlink process", description: "This turns off the device during the unlink/disabling of the device process or shutdown of the app", type:"boolean", default:"false"},
-		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "DreamviewV1", "DreamviewV2", "RazerV1", "RazerV2", "Static"], default:"Auto"},
+		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "Dreamview", "RazerV1", "RazerV2", "Static"], default:"Auto"},
 	];
 }
 
@@ -102,7 +102,7 @@ function fetchDeviceInfoFromTableAndConfigure() {
 
 function GetAutoProtocol(GoveeDeviceInfo){
 	if(GoveeDeviceInfo.supportDreamView){
-		return "DreamviewV1";
+		return "Dreamview";
 	}
 
 	if(GoveeDeviceInfo.supportRazer){
@@ -570,17 +570,7 @@ class GoveeProtocol {
 		return checksum;
 	}
 
-	createDreamViewPacketV1(colors) {
-		// Define the Dreamview protocol header
-		const header = [0xBB, 0x00, 0x20, 0xB0, 0x01, colors.length / 3];
-		const fullPacket = header.concat(colors);
-		const checksum = this.calculateXorChecksum(fullPacket);
-		fullPacket.push(checksum);
-
-		return fullPacket;
-	}
-
-	createDreamViewPacketV2(colors) {
+	createDreamViewPacket(colors) {
 		// Define the Dreamview protocol header
 
 		const packetToCheck = [0x01, colors.length / 3].concat(colors);
@@ -684,12 +674,10 @@ class GoveeProtocol {
 		}
 
 		switch (protocolSelect === "Auto" ? autoProtocol : protocolSelect) {
-			case "DreamviewV1":
-				packet = this.createDreamViewPacketV1(RGBData);
-				this.SendEncodedPacket(packet);
-				break;
-			case "DreamviewV2":
-				packet = this.createDreamViewPacketV2(RGBData);
+			// One Dreamview frame, with the length computed. The old split into V1/V2 was really
+			// a broken implementation sitting next to a correct one, not two protocol versions.
+			case "Dreamview":
+				packet = this.createDreamViewPacket(RGBData);
 				this.SendEncodedPacket(packet);
 				break;
 			case "RazerV1":
