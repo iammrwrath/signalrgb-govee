@@ -415,7 +415,11 @@ export function DiscoveryService() {
 class GoveeController{
 	 constructor(value){
 		this.id = value?.id ?? "Unknown ID";
-		this.paired = value?.paired ?? false;
+		// Discovery responses carry no pairing state, and this constructor persists straight
+		// to the cache below. Without the cache fallback a scan reply that arrives before the
+		// cached devices load rebuilds the controller as unpaired and writes that over the
+		// stored true, so the device stops linking itself on startup.
+		this.paired = value?.paired ?? discovery.cache.Get(this.id)?.paired ?? false;
 
 		let response;
 
