@@ -81,10 +81,12 @@ export function Initialize(){
 }
 
 export function Render(){
-	// Roughly every ten seconds at the default frame rate.
-	if(renderCount % 300 === 0){
-		device.log(`Render tick ${renderCount}.`);
-	}
+	// Uncomment to trace the render loop. Distinguishes a loop that never starts from one
+	// that starts and later stops -- neither is otherwise visible, since a device holds its
+	// last color rather than going dark.
+	// if(renderCount % 300 === 0){
+	// 	device.log(`Render tick ${renderCount}.`);
+	// }
 
 	// Initialize starts the socket and then sends the setup commands straight away, before
 	// connect() has reported back, so they can go out on a socket that is not ready yet.
