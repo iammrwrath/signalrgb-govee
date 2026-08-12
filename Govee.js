@@ -81,15 +81,12 @@ export function Shutdown(SystemSuspending){
 		return;
 	}
 
-	// colorwc sets the device's own state, so it survives us going away. Everything here
-	// avoids touching device.* on purpose: the device is being torn down around us, so the
-	// color is parsed by hand and this skips SetStaticColor's render-loop pause.
+	// colorwc sets the device's own state, so it survives us going away. Color properties
+	// arrive as objects rather than hex strings, so the conversion goes through
+	// createColorArray like everywhere else. SendStaticColor skips SetStaticColor's
+	// render-loop pause, which has no business running while the device is being torn down.
 	const color = SystemSuspending ? "#000000" : shutdownColor;
-	govee.SendStaticColor([
-		parseInt(color.substr(1, 2), 16),
-		parseInt(color.substr(3, 2), 16),
-		parseInt(color.substr(5, 2), 16)
-	]);
+	govee.SendStaticColor(device.createColorArray(color, 1, "Inline"));
 }
 
 function fetchDeviceInfoFromTableAndConfigure() {
