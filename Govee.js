@@ -471,7 +471,9 @@ class GoveeController{
 
 	updateWithValue(value){
 		this.id = value.id;
-		this.paired = value.paired;
+		// Discovery responses carry no pairing state, so only take it when it's actually
+		// present. Assigning it blindly unpaired the device on every scan reply.
+		this.paired = value.paired ?? this.paired;
 
 		let response;
 
