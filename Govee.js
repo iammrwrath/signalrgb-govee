@@ -81,6 +81,15 @@ export function Render(){
 		device.log(`Render tick ${renderCount}.`);
 	}
 
+	// Stream mode is handed to us by one unacknowledged datagram in Initialize. Lose it and
+	// the device ignores every frame we send, holding whatever state it already had -- which
+	// looks identical to working from this side, and previously needed a manual disable and
+	// re-enable to recover. Re-asserting costs one small packet every few seconds and makes
+	// a dropped enable heal itself.
+	if(renderCount % 150 === 0){
+		govee.SetRazerMode(true);
+	}
+
 	renderCount++;
 
 	govee.SendRGB();
