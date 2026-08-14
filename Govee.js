@@ -14,8 +14,9 @@ forcedColor:readonly
 TurnOffOnShutdown:readonly
 protocolSelect:readonly
 probeEnabled:readonly
-probeUnitCount:readonly
-probeUnitIndex:readonly
+probeStrand:readonly
+probeUnitsPerStrand:readonly
+probeLitPerStrand:readonly
 */
 export function ControllableParameters() {
 	return [
@@ -29,9 +30,10 @@ export function ControllableParameters() {
 		// actually addresses on a device -- a single LED, a whole strand, or a zone spanning
 		// several. Bypasses channels and components entirely so a dark result cannot be blamed
 		// on component configuration.
-		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Replaces normal rendering with a single lit unit, to work out what one unit addresses on the device.", type:"boolean", default:"false"},
-		{property:"probeUnitCount", group:"settings", label:"Probe: Unit Count", description: "TEMPORARY. How many units the probe frame declares.", type:"number", min:"1", max:"400", default:"20", step:"1"},
-		{property:"probeUnitIndex", group:"settings", label:"Probe: Lit Unit", description: "TEMPORARY. Which single unit is lit white. Step through these to map unit index to physical LEDs.", type:"number", min:"0", max:"399", default:"0", step:"1"},
+		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Replaces normal rendering with a lit strand, to work out what the device can actually address.", type:"boolean", default:"false"},
+		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand to light, 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
+		{property:"probeUnitsPerStrand", group:"settings", label:"Probe: Units Per Strand", description: "TEMPORARY. Frame declares 20 x this many units. At 1 the device gets 20 units, one per strand. Above 1 tests whether extra units subdivide a strand.", type:"number", min:"1", max:"12", default:"1", step:"1"},
+		{property:"probeLitPerStrand", group:"settings", label:"Probe: Lit Units On That Strand", description: "TEMPORARY. How many of the chosen strand's units are lit. Only meaningful when Units Per Strand is above 1.", type:"number", min:"1", max:"12", default:"1", step:"1"},
 	];
 }
 
@@ -753,26 +755,41 @@ class GoveeProtocol {
 
 	// TEMPORARY. Remove with the probe properties.
 	//
-	// Sends a frame declaring probeUnitCount units, all black except probeUnitIndex, which is
-	// white. Stepping the index through and watching which physical LEDs respond tells us what a
-	// unit addresses: one LED, one strand, or a zone spanning several. Deliberately builds
-	// RGBData by hand rather than from channels, so the wire protocol is isolated from the
-	// canvas mapping and a dark result cannot be blamed on component setup.
+	// The H70BC has 20 hanging strands. At 20 units one unit lights one whole strand, so there is
+	// nothing finer to address; "LEDs on a strand" only becomes meaningful if declaring more than
+	// 20 units subdivides them. probeUnitsPerStrand tests that: the frame declares
+	// 20 x probeUnitsPerStrand units, and probeLitPerStrand of the chosen strand's units are lit.
+	//
+	// Every unit in the frame is always written, so the device receives a complete picture each
+	// time. A partial frame would let previously lit strands persist if the device latches state,
+	// which reads as several strands lighting at once and is easy to mistake for a mapping quirk.
+	//
+	// RGBData is built by hand rather than from channels, so the wire protocol is isolated from
+	// the canvas mapping -- a wrong result cannot be blamed on component setup.
 	SendProbeFrame(){
-		const unitCount = Math.max(1, Math.min(400, Number(probeUnitCount) | 0));
-		const litUnit = Math.max(0, Math.min(unitCount - 1, Number(probeUnitIndex) | 0));
+		const perStrand = Math.max(1, Math.min(12, Number(probeUnitsPerStrand) | 0));
+		const strand = Math.max(1, Math.min(20, Number(probeStrand) | 0));
+		const lit = Math.max(1, Math.min(perStrand, Number(probeLitPerStrand) | 0));
 
+		const unitCount = 20 * perStrand;
 		const RGBData = new Array(unitCount * 3).fill(0);
-		RGBData[litUnit * 3] = 255;
-		RGBData[litUnit * 3 + 1] = 255;
-		RGBData[litUnit * 3 + 2] = 255;
+
+		const firstUnit = (strand - 1) * perStrand;
+
+		for(let i = 0; i < lit; i++){
+			const unit = (firstUnit + i) * 3;
+			RGBData[unit] = 255;
+			RGBData[unit + 1] = 255;
+			RGBData[unit + 2] = 255;
+		}
 
 		const packet = this.createDreamViewPacket(RGBData);
 
-		if(renderCount % 60 === 0){
+		if(renderCount % 120 === 0){
 			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
-			device.log(`Probe: ${unitCount} unit(s), lit index ${litUnit}, frame ${packet.length} bytes.`);
-			device.log(`Probe frame: ${hex.length > 400 ? `${hex.slice(0, 400)}...` : hex}`);
+			device.log(`Probe: strand ${strand}, ${perStrand} unit(s)/strand, ${lit} lit, `
+				+ `units ${firstUnit}-${firstUnit + lit - 1} of ${unitCount}, frame ${packet.length} bytes.`);
+			device.log(`Probe frame: ${hex.length > 320 ? `${hex.slice(0, 320)}...` : hex}`);
 		}
 
 		this.SendEncodedPacket(packet);
@@ -1559,7 +1576,11 @@ const GoveeDeviceLibrary = {
 		state: 1,
 		supportRazer: true,
 		supportDreamView: true,
-		ledCount: 400 // 20 strands of 20. One channel, so the component decides the layout.
+		// 400 physical LEDs in 20 hanging strands, but DreamView only addresses the strands: one
+		// unit lights one whole strand, and unit index maps to strand 1:1. Verified on hardware
+		// with the unit probe. Declaring any other count makes the device map the values across
+		// the strands in a way that does not match what was sent, so this has to stay at 20.
+		ledCount: 20
 	},
 	H61D5: {
 		name: "RGBIC Neon Lights 2",
