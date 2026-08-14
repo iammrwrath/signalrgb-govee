@@ -28,7 +28,7 @@ export function ControllableParameters() {
 		{property:"forcedColor", group:"lighting", label:"Forced Color", description: "The color used when 'Forced' Lighting Mode is enabled", min:"0", max:"360", type:"color", default:"#009bde"},
 		{property:"TurnOffOnShutdown", group:"settings", label:"Turn off on unlink process", description: "This turns off the device during the unlink/disabling of the device process or shutdown of the app", type:"boolean", default:"false"},
 		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "Dreamview", "RazerV1", "RazerV2", "Static"], default:"Auto"},
-		{property:"blendSegments", group:"settings", label:"Blend Between Segments", description: "Lets the device fade between the colors we send instead of applying each one to its own segment. Softer on a strip, wrong on anything built from separate physical pieces like a curtain, where it blends across a gap that is not there in the light.", type:"boolean", default:"false"},
+		{property:"blendSegments", group:"settings", label:"Blend Between Segments", description: "Lets the device fade between the colors we send instead of applying each one to its own segment. Auto follows what the device library says. Softer on a strip, wrong on anything built from separate physical pieces like a curtain, where it blends across a gap that is not there in the light.", type:"combobox", values:["Auto", "On", "Off"], default:"Auto"},
 
 		// TEMPORARY protocol probe. Remove before release. Answers what a DreamView "unit"
 		// actually addresses on a device -- a single LED, a whole strand, or a zone spanning
@@ -186,6 +186,7 @@ function fetchDeviceInfoFromTableAndConfigure() {
 	}
 
 	const GoveeDeviceInfo = GoveeDeviceLibrary[controller.sku];
+	blendByDefault = GoveeDeviceInfo.blendSegments ?? true;
 	device.setName(`Govee ${GoveeDeviceInfo.sku} - ${GoveeDeviceInfo.name}`);
 	autoProtocol = GetAutoProtocol(GoveeDeviceInfo);
 	device.log(`Auto protocol for ${GoveeDeviceInfo.sku} resolved to ${autoProtocol}.`);
@@ -203,6 +204,21 @@ function GetAutoProtocol(GoveeDeviceInfo){
 
 	// Everything else only ever responded to plain colorwc commands.
 	return "Static";
+}
+
+/** Whether to let the firmware fade between the colors we send. Auto defers to the library, since
+ * whether blending helps depends on the device being one continuous run of LEDs rather than
+ * several separate pieces. */
+function ShouldBlend(){
+	if(blendSegments === "On"){
+		return true;
+	}
+
+	if(blendSegments === "Off"){
+		return false;
+	}
+
+	return blendByDefault;
 }
 
 function GetChannelLayout(GoveeDeviceInfo){
@@ -658,7 +674,12 @@ class GoveeProtocol {
 	 * Razer protocol despite the JSON envelope -- "razer" is simply how the LAN API carries
 	 * any encoded packet, colour frames included. The payloads decode to
 	 * BB 00 01 B1 01 0A and BB 00 01 B1 00 0B: command 0xB1, enable and disable. Colour
-	 * frames (0xB0) are ignored unless this has been enabled. */
+	 * frames (0xB0) are ignored unless this has been enabled.
+	 *
+	 * NOT FREE TO SEND. Enabling costs a brief blank on the device as it re-enters stream mode.
+	 * One is unnoticeable at startup; on a repeat it reads as a black flash, and sending it every
+	 * 150 frames was the source of the flicker reports. Send it when control is actually being
+	 * taken, never on a timer, and never as a cheap "just in case". */
 	SetStreamingMode(enable){
 		UDPServer.send(JSON.stringify({msg:{cmd:"razer", data:{pt:enable?"uwABsQEK":"uwABsQAL"}}}));
 	}
@@ -894,7 +915,7 @@ class GoveeProtocol {
 			// One Dreamview frame, with the length computed. The old split into V1/V2 was really
 			// a broken implementation sitting next to a correct one, not two protocol versions.
 			case "Dreamview":
-				packet = this.createDreamViewPacket(RGBData, blendSegments ? 0x01 : 0x00);
+				packet = this.createDreamViewPacket(RGBData, ShouldBlend() ? 0x01 : 0x00);
 				this.SendEncodedPacket(packet);
 				break;
 			case "RazerV1":
@@ -1107,7 +1128,13 @@ class IPCache{
 
 // eslint-disable-next-line max-len
 /** @typedef { {name: string, ledCount: number, size: number[], ledNames: string[], ledPositions: number[][] } } GoveeSubdevice */
-/** @typedef { {name: string, deviceImage: string, sku: string, state: number, supportRazer: boolean, supportDreamView: boolean, ledCount: number, hasVariableLedCount?: boolean, usesSubDevices?: boolean, subdevices?: GoveeSubdevice[] } } GoveeDevice */
+/** blendSegments: whether the device should fade between the colors we send rather than applying
+ * each to its own segment. Absent means blend, matching what shipped before the byte was
+ * understood. Set false on anything built from separate physical pieces -- on a curtain the fade
+ * crosses the gap between two hanging strands, a seam that exists in the data order and not in
+ * the light. */
+// eslint-disable-next-line max-len
+/** @typedef { {name: string, deviceImage: string, sku: string, state: number, supportRazer: boolean, supportDreamView: boolean, ledCount: number, hasVariableLedCount?: boolean, usesSubDevices?: boolean, subdevices?: GoveeSubdevice[], blendSegments?: boolean } } GoveeDevice */
 /** @type {Object.<string, GoveeDevice>} */
 const GoveeDeviceLibrary = {
 	H6061: {
@@ -1657,10 +1684,13 @@ const GoveeDeviceLibrary = {
 		supportRazer: true,
 		supportDreamView: true,
 		// 400 physical LEDs in 20 hanging strands, but DreamView only addresses the strands: one
-		// unit lights one whole strand, and unit index maps to strand 1:1. Verified on hardware
-		// with the unit probe. Declaring any other count makes the device map the values across
-		// the strands in a way that does not match what was sent, so this has to stay at 20.
-		ledCount: 20
+		// colour lights one whole strand, and colour index maps to strand 1:1. Verified on
+		// hardware. Sending any other count makes the device spread the colours across the strands
+		// in a way that does not match what was sent, and above 20 it blanks entirely. LedFx report
+		// the same ceiling independently: "H70B1 Curtain Lights: ceases to work about 20".
+		ledCount: 20,
+		// Separate hanging strands, so blending fades across a gap that is not there in the light.
+		blendSegments: false
 	},
 	H61D5: {
 		name: "RGBIC Neon Lights 2",
