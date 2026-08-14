@@ -670,12 +670,18 @@ class GoveeProtocol {
 		return checksum;
 	}
 
-	// The byte before the colour count selects how the device treats the colours. The protocol
-	// reference says 0xB0 "supports gradient mode and discrete segments", and we have always sent
-	// 0x01 without knowing which that is. On the H70BC curtain, lighting one strand also lights
-	// its neighbour more dimly, which is what interpolation between colours looks like -- so 0x01
-	// may well be the gradient mode. mode is overridable so the probe can sweep it.
-	createDreamViewPacket(colors, mode = 0x01) {
+	// Byte 4, before the colour count, changes how the device treats the colours. We sent 0x01 for
+	// years without knowing what it meant. Measured on an H70BC curtain: at 0x00 a colour fills its
+	// segment cleanly, at 0x01 it bleeds into the neighbouring segment. Anything above 1 behaves
+	// like 1, which rules out a bit flag.
+	//
+	// 0x00 is the right default. SignalRGB hands us one colour per addressable segment and expects
+	// them applied as given, and on a curtain the bleed crosses a physical gap between strands that
+	// does not exist in the light. Whatever the field is really called, we want the version that
+	// does not smear our pixels.
+	//
+	// Overridable so the probe can sweep it.
+	createDreamViewPacket(colors, mode = 0x00) {
 		// Define the Dreamview protocol header
 
 		const packetToCheck = [mode & 0xff, colors.length / 3].concat(colors);
