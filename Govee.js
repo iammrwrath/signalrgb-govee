@@ -90,6 +90,11 @@ let sawConnectedSocket = false;
 /** So the "not initialized yet" warning is logged once rather than every frame. */
 let loggedMissingProtocol = false;
 
+/** Whether this device should let the firmware fade between the colors we send. Seeded from the
+ * library per device, since whether blending helps depends on the device being one continuous run
+ * of LEDs rather than several separate pieces. */
+let blendByDefault = true;
+
 /** Stream mode auto-disables in the device after roughly a minute, so it has to be re-asserted.
  * Each assert costs a brief blank on the device, so this is as slow as it can safely be rather
  * than as fast as possible. Timestamp, not a frame count -- a frame count means a different
