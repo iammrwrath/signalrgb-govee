@@ -17,6 +17,7 @@ probeEnabled:readonly
 probeStrand:readonly
 probeLedsPerStrand:readonly
 probeLitLedsPerStrand:readonly
+probeModeByte:readonly
 */
 export function ControllableParameters() {
 	return [
@@ -34,6 +35,7 @@ export function ControllableParameters() {
 		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand lights up. 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 		{property:"probeLedsPerStrand", group:"settings", label:"Probe: LEDs Per Strand", description: "TEMPORARY. How many colours we send per strand. 1 lights whole strands. Above 1 tests whether the device will split a strand.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 		{property:"probeLitLedsPerStrand", group:"settings", label:"Probe: Lit LEDs Per Strand", description: "TEMPORARY. How much of the chosen strand lights. Only does anything when LEDs Per Strand is above 1.", type:"number", min:"1", max:"20", default:"1", step:"1"},
+		{property:"probeModeByte", group:"settings", label:"Probe: Mode Byte", description: "TEMPORARY. The byte before the colour count. We have always sent 1. The device may treat 1 as a gradient, which would explain neighbouring strands lighting dimly. Try 0, 2, 3.", type:"number", min:"0", max:"8", default:"1", step:"1"},
 	];
 }
 
@@ -650,10 +652,15 @@ class GoveeProtocol {
 		return checksum;
 	}
 
-	createDreamViewPacket(colors) {
+	// The byte before the colour count selects how the device treats the colours. The protocol
+	// reference says 0xB0 "supports gradient mode and discrete segments", and we have always sent
+	// 0x01 without knowing which that is. On the H70BC curtain, lighting one strand also lights
+	// its neighbour more dimly, which is what interpolation between colours looks like -- so 0x01
+	// may well be the gradient mode. mode is overridable so the probe can sweep it.
+	createDreamViewPacket(colors, mode = 0x01) {
 		// Define the Dreamview protocol header
 
-		const packetToCheck = [0x01, colors.length / 3].concat(colors);
+		const packetToCheck = [mode & 0xff, colors.length / 3].concat(colors);
 
 		const header = [0xBB, (packetToCheck.length >> 8 & 0xff), (packetToCheck.length & 0xff), 0xB0];
 		const fullPacket = header.concat(packetToCheck);
@@ -789,12 +796,13 @@ class GoveeProtocol {
 			RGBData[at + 2] = 255;
 		}
 
-		const packet = this.createDreamViewPacket(RGBData);
+		const mode = Math.max(0, Math.min(255, Number(probeModeByte) | 0));
+		const packet = this.createDreamViewPacket(RGBData, mode);
 
 		if(renderCount % 120 === 0){
 			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
 			device.log(`Probe: strand ${strand}, lighting ${lit} of ${perStrand} per strand, `
-				+ `${colourCount} colours sent, frame ${packet.length} bytes.`);
+				+ `${colourCount} colours sent, mode byte ${mode}, frame ${packet.length} bytes.`);
 			device.log(`Probe frame: ${hex.length > 320 ? `${hex.slice(0, 320)}...` : hex}`);
 		}
 
