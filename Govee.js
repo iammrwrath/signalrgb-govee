@@ -136,15 +136,16 @@ export function Render(){
 		govee.SetStreamingMode(true);
 	}
 
-	// Stream mode is handed to us by one unacknowledged datagram in Initialize. Lose it and
-	// the device ignores every frame we send, holding whatever state it already had -- which
-	// looks identical to working from this side, and previously needed a manual disable and
-	// re-enable to recover.
+	// Stream mode is handed to us by one unacknowledged datagram, so a lost packet leaves the
+	// device ignoring every frame while looking fine from here. Assert it on the opening frames
+	// to cover that.
 	//
-	// The riskiest moment is the start of the stream, when the socket has only just been
-	// opened, so assert it on the opening frames and then keep it topped up every few
-	// seconds. The command is idempotent and small.
-	if(renderCount < 5 || renderCount % 150 === 0){
+	// Deliberately NOT re-asserted periodically. It used to fire every 150 frames, and 0xB1 blanks
+	// the device briefly as it re-enters stream mode -- a visible black flash every five seconds at
+	// 30fps, which is what the flicker reports were. It was added to guard against a one minute
+	// auto-disable mentioned in the protocol reference, but we have never observed that timeout, and
+	// if it is an inactivity timeout then continuous streaming already prevents it.
+	if(renderCount < 5){
 		govee.SetStreamingMode(true);
 	}
 
