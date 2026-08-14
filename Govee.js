@@ -13,6 +13,7 @@ LightingMode:readonly
 forcedColor:readonly
 TurnOffOnShutdown:readonly
 protocolSelect:readonly
+blendSegments:readonly
 probeEnabled:readonly
 probeStrand:readonly
 probeLedsPerStrand:readonly
@@ -27,6 +28,7 @@ export function ControllableParameters() {
 		{property:"forcedColor", group:"lighting", label:"Forced Color", description: "The color used when 'Forced' Lighting Mode is enabled", min:"0", max:"360", type:"color", default:"#009bde"},
 		{property:"TurnOffOnShutdown", group:"settings", label:"Turn off on unlink process", description: "This turns off the device during the unlink/disabling of the device process or shutdown of the app", type:"boolean", default:"false"},
 		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "Dreamview", "RazerV1", "RazerV2", "Static"], default:"Auto"},
+		{property:"blendSegments", group:"settings", label:"Blend Between Segments", description: "Lets the device fade between the colors we send instead of applying each one to its own segment. Softer on a strip, wrong on anything built from separate physical pieces like a curtain, where it blends across a gap that is not there in the light.", type:"boolean", default:"false"},
 
 		// TEMPORARY protocol probe. Remove before release. Answers what a DreamView "unit"
 		// actually addresses on a device -- a single LED, a whole strand, or a zone spanning
@@ -891,7 +893,7 @@ class GoveeProtocol {
 			// One Dreamview frame, with the length computed. The old split into V1/V2 was really
 			// a broken implementation sitting next to a correct one, not two protocol versions.
 			case "Dreamview":
-				packet = this.createDreamViewPacket(RGBData);
+				packet = this.createDreamViewPacket(RGBData, blendSegments ? 0x01 : 0x00);
 				this.SendEncodedPacket(packet);
 				break;
 			case "RazerV1":
