@@ -36,7 +36,7 @@ export function ControllableParameters() {
 		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand lights up. 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 		{property:"probeLedsPerStrand", group:"settings", label:"Probe: LEDs Per Strand", description: "TEMPORARY. How many colours we send per strand. 1 lights whole strands. Above 1 tests whether the device will split a strand.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 		{property:"probeLitLedsPerStrand", group:"settings", label:"Probe: Lit LEDs Per Strand", description: "TEMPORARY. How much of the chosen strand lights. Only does anything when LEDs Per Strand is above 1.", type:"number", min:"1", max:"20", default:"1", step:"1"},
-		{property:"probePattern", group:"settings", label:"Probe: Pattern", description: "TEMPORARY. One Strand checks which strand is which. Two Stops puts red on strand 1 and blue on strand 3, so strand 2 shows whether the device blends between colours. Rainbow gives all 20 strands a different hue.", type:"combobox", values:["One Strand", "Two Stops", "Rainbow"], default:"One Strand"},
+		{property:"probePattern", group:"settings", label:"Probe: Pattern", description: "TEMPORARY. One Strand checks which strand is which. Two Stops puts red on strand 1 and blue on strand 3. Red, One Blue fills every strand red except the chosen one, which is the real test of whether the device blends between two colours. Rainbow gives all 20 strands a different hue.", type:"combobox", values:["One Strand", "Two Stops", "Red, One Blue", "Rainbow"], default:"One Strand"},
 		{property:"probeModeByte", group:"settings", label:"Probe: Byte 4", description: "TEMPORARY. The byte before the colour count, which we have always sent as 1. Zero and non-zero render differently but we do not know what the field means. Try 0 and 1 against each pattern.", type:"number", min:"0", max:"8", default:"1", step:"1"},
 	];
 }
@@ -824,9 +824,23 @@ class GoveeProtocol {
 		};
 
 		if(probePattern === "Two Stops"){
-			// Strand 1 red, strand 3 blue. Strand 2 is deliberately left unset.
+			// Strand 1 red, strand 3 blue, strand 2 left at black.
+			//
+			// Note this cannot show a red-to-blue blend: strand 2's slot is not a gap, it is a
+			// black stop, so a device that interpolates ramps black to blue across it rather than
+			// red to blue. Kept because that is still a useful signal, but "Red, One Blue" is the
+			// pattern that actually tests blending between two colours.
 			paint(0, [255, 0, 0]);
 			paint(2 * perStrand, [0, 0, 255]);
+		}else if(probePattern === "Red, One Blue"){
+			// Every strand red except the chosen one, which is blue. No black anywhere, so the
+			// strands either side of the blue one have red and blue as neighbouring stops. A
+			// device that blends must show purple there; one that does not shows hard edges.
+			for(let s = 0; s < StrandCount; s++){
+				paint(s * perStrand, [255, 0, 0]);
+			}
+
+			paint((strand - 1) * perStrand, [0, 0, 255]);
 		}else if(probePattern === "Rainbow"){
 			for(let s = 0; s < StrandCount; s++){
 				paint(s * perStrand, HueToRgb((s * 360) / StrandCount));
