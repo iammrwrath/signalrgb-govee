@@ -13,6 +13,9 @@ LightingMode:readonly
 forcedColor:readonly
 TurnOffOnShutdown:readonly
 protocolSelect:readonly
+probeEnabled:readonly
+probeUnitCount:readonly
+probeUnitIndex:readonly
 */
 export function ControllableParameters() {
 	return [
@@ -21,6 +24,14 @@ export function ControllableParameters() {
 		{property:"forcedColor", group:"lighting", label:"Forced Color", description: "The color used when 'Forced' Lighting Mode is enabled", min:"0", max:"360", type:"color", default:"#009bde"},
 		{property:"TurnOffOnShutdown", group:"settings", label:"Turn off on unlink process", description: "This turns off the device during the unlink/disabling of the device process or shutdown of the app", type:"boolean", default:"false"},
 		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "Dreamview", "RazerV1", "RazerV2", "Static"], default:"Auto"},
+
+		// TEMPORARY protocol probe. Remove before release. Answers what a DreamView "unit"
+		// actually addresses on a device -- a single LED, a whole strand, or a zone spanning
+		// several. Bypasses channels and components entirely so a dark result cannot be blamed
+		// on component configuration.
+		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Replaces normal rendering with a single lit unit, to work out what one unit addresses on the device.", type:"boolean", default:"false"},
+		{property:"probeUnitCount", group:"settings", label:"Probe: Unit Count", description: "TEMPORARY. How many units the probe frame declares.", type:"number", min:"1", max:"400", default:"20", step:"1"},
+		{property:"probeUnitIndex", group:"settings", label:"Probe: Lit Unit", description: "TEMPORARY. Which single unit is lit white. Step through these to map unit index to physical LEDs.", type:"number", min:"0", max:"399", default:"0", step:"1"},
 	];
 }
 
@@ -740,9 +751,42 @@ class GoveeProtocol {
 		return componentChannel.getColors("Inline");
 	}
 
+	// TEMPORARY. Remove with the probe properties.
+	//
+	// Sends a frame declaring probeUnitCount units, all black except probeUnitIndex, which is
+	// white. Stepping the index through and watching which physical LEDs respond tells us what a
+	// unit addresses: one LED, one strand, or a zone spanning several. Deliberately builds
+	// RGBData by hand rather than from channels, so the wire protocol is isolated from the
+	// canvas mapping and a dark result cannot be blamed on component setup.
+	SendProbeFrame(){
+		const unitCount = Math.max(1, Math.min(400, Number(probeUnitCount) | 0));
+		const litUnit = Math.max(0, Math.min(unitCount - 1, Number(probeUnitIndex) | 0));
+
+		const RGBData = new Array(unitCount * 3).fill(0);
+		RGBData[litUnit * 3] = 255;
+		RGBData[litUnit * 3 + 1] = 255;
+		RGBData[litUnit * 3 + 2] = 255;
+
+		const packet = this.createDreamViewPacket(RGBData);
+
+		if(renderCount % 60 === 0){
+			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
+			device.log(`Probe: ${unitCount} unit(s), lit index ${litUnit}, frame ${packet.length} bytes.`);
+			device.log(`Probe frame: ${hex.length > 400 ? `${hex.slice(0, 400)}...` : hex}`);
+		}
+
+		this.SendEncodedPacket(packet);
+	}
+
 	SendRGB(overrideColor) {
 		let RGBData = [];
 		let packet  = [];
+
+		if(probeEnabled){
+			this.SendProbeFrame();
+
+			return;
+		}
 
 		// Segments go on the wire in channel order, matching how the device chains them.
 		for(const channel of channels){
