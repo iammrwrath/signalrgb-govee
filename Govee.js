@@ -90,10 +90,18 @@ let sawConnectedSocket = false;
 /** So the "not initialized yet" warning is logged once rather than every frame. */
 let loggedMissingProtocol = false;
 
+/** Stream mode auto-disables in the device after roughly a minute, so it has to be re-asserted.
+ * Each assert costs a brief blank on the device, so this is as slow as it can safely be rather
+ * than as fast as possible. Timestamp, not a frame count -- a frame count means a different
+ * interval on every device. */
+const StreamingAssertInterval = 40000;
+let lastStreamingAssert = 0;
+
 export function Initialize(){
 	loggedFirstFrame = false;
 	renderCount = 0;
 	sawConnectedSocket = false;
+	lastStreamingAssert = 0;
 	device.addFeature("base64");
 
 	device.setName(controller.sku);
@@ -151,16 +159,24 @@ export function Render(){
 		govee.SetStreamingMode(true);
 	}
 
-	// Stream mode is handed to us by one unacknowledged datagram, so a lost packet leaves the
-	// device ignoring every frame while looking fine from here. Assert it on the opening frames
-	// to cover that.
+	// Stream mode is handed to us by one unacknowledged datagram, so a lost packet leaves the device
+	// ignoring every frame while looking fine from here. Assert it on the opening frames to cover
+	// that.
 	//
-	// Deliberately NOT re-asserted periodically. It used to fire every 150 frames, and 0xB1 blanks
-	// the device briefly as it re-enters stream mode -- a visible black flash every five seconds at
-	// 30fps, which is what the flicker reports were. It was added to guard against a one minute
-	// auto-disable mentioned in the protocol reference, but we have never observed that timeout, and
-	// if it is an inactivity timeout then continuous streaming already prevents it.
-	if(renderCount < 5){
+	// It also has to be kept alive. The protocol reference mentions a one minute auto-disable, and
+	// removing the periodic re-assert stranded both bench devices frozen on their last frame, which
+	// is what losing stream mode looks like -- the device holds what it has and ignores us.
+	//
+	// Timed rather than counted. The old version fired every 150 frames, which is five seconds on a
+	// device rendering at 30fps and seventy five on one crawling at 2 -- simultaneously flashing
+	// constantly on fast devices and missing the timeout entirely on slow ones. Wall clock is the
+	// only thing that relates to a firmware timeout.
+	//
+	// Every assert costs a brief blank, so this is a floor and not something to lower casually.
+	const now = Date.now();
+
+	if(now - lastStreamingAssert > StreamingAssertInterval){
+		lastStreamingAssert = now;
 		govee.SetStreamingMode(true);
 	}
 
