@@ -87,6 +87,9 @@ let renderCount = 0;
  * asserted once it actually is. */
 let sawConnectedSocket = false;
 
+/** So the "not initialized yet" warning is logged once rather than every frame. */
+let loggedMissingProtocol = false;
+
 export function Initialize(){
 	loggedFirstFrame = false;
 	renderCount = 0;
@@ -119,6 +122,18 @@ export function Initialize(){
 }
 
 export function Render(){
+	// Initialize assigns govee only after fetchDeviceInfoFromTableAndConfigure has run, so if that
+	// throws -- or Render is reached before Initialize at all -- govee is undefined and every call
+	// below fails with "Cannot read property of undefined". Bail instead of throwing once per frame.
+	if(govee === undefined){
+		if(!loggedMissingProtocol){
+			loggedMissingProtocol = true;
+			device.log("Render called before the device finished initializing. Nothing to send yet.");
+		}
+
+		return;
+	}
+
 	// Uncomment to trace the render loop. Distinguishes a loop that never starts from one
 	// that starts and later stops -- neither is otherwise visible, since a device holds its
 	// last color rather than going dark.
@@ -156,6 +171,14 @@ export function Render(){
 }
 
 export function Shutdown(SystemSuspending){
+	// Shutdown runs on paths where Initialize never completed -- a device that failed to come up,
+	// or a reload racing teardown -- so govee can be undefined here. Throwing in Shutdown is
+	// particularly bad: the host discards the result on the app-exit path, so it surfaces as the
+	// shutdown color silently not applying rather than as an error.
+	if(govee === undefined){
+		return;
+	}
+
 	// Hand control back to the device first. Anything streamed at it before this point is
 	// discarded along with the stream, which is why the shutdown color never stuck.
 	govee.SetStreamingMode(false);
@@ -279,7 +302,13 @@ export function DiscoveryService() {
 			this.CreateControllerDevice(value);
 			this.checkCachedDevice(value.ip);
 
-			if(value.paired === true){ 
+			// A device in the cache is one the user has already accepted, so control it unless they
+			// have explicitly said not to. The stored flag is named "paired", but the only thing it
+			// ever means is "ignored": unlink writes false, nothing else does. Requiring true left
+			// anyone whose flag was lost -- or never written -- with a device that appears in the
+			// list and does nothing, recoverable only by pressing Link, which is not a thing we can
+			// ask of people.
+			if(value.paired !== false){
 				this.link(value)
 			}
 		}
