@@ -15,6 +15,8 @@ TurnOffOnShutdown:readonly
 protocolSelect:readonly
 probeEnabled:readonly
 probeStrand:readonly
+probeLedsPerStrand:readonly
+probeLitLedsPerStrand:readonly
 */
 export function ControllableParameters() {
 	return [
@@ -30,6 +32,8 @@ export function ControllableParameters() {
 		// on component configuration.
 		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Lights one strand white and everything else black, to check which strand is which.", type:"boolean", default:"false"},
 		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand lights up. 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
+		{property:"probeLedsPerStrand", group:"settings", label:"Probe: LEDs Per Strand", description: "TEMPORARY. How many colours we send per strand. 1 lights whole strands. Above 1 tests whether the device will split a strand.", type:"number", min:"1", max:"20", default:"1", step:"1"},
+		{property:"probeLitLedsPerStrand", group:"settings", label:"Probe: Lit LEDs Per Strand", description: "TEMPORARY. How much of the chosen strand lights. Only does anything when LEDs Per Strand is above 1.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 	];
 }
 
@@ -754,25 +758,43 @@ class GoveeProtocol {
 
 	// TEMPORARY. Remove with the probe properties.
 	//
-	// Sends one colour per strand: white for the chosen strand, black for the other 19. Every
-	// strand is written every frame, so nothing can linger from a previous frame if the device
-	// holds onto state -- that was making several strands appear lit at once.
+	// Two experiments in one:
 	//
-	// Colours are built by hand rather than read from the canvas, so this tests the device and
-	// the packet only, with the component layout out of the picture.
+	//   LEDs Per Strand = 1  -> 20 colours sent, one per strand. Lights whole strands. Known to
+	//                           work: picking a strand lights that strand.
+	//   LEDs Per Strand > 1  -> more than 20 colours sent, so each strand gets a share of them.
+	//                           If the device honours that, Lit LEDs Per Strand lights only part
+	//                           of the chosen strand. If it does not, expect nothing or nonsense,
+	//                           which tells us the device only ever does whole strands.
+	//
+	// Every colour in the frame is written every time, so nothing lingers from the previous frame
+	// if the device holds state -- that was making several strands appear lit at once.
+	//
+	// Colours are built by hand rather than read from the canvas, so this tests the device and the
+	// packet only, with the component layout out of the picture.
 	SendProbeFrame(){
+		const perStrand = Math.max(1, Math.min(20, Number(probeLedsPerStrand) | 0));
 		const strand = Math.max(1, Math.min(StrandCount, Number(probeStrand) | 0));
-		const RGBData = new Array(StrandCount * 3).fill(0);
+		const lit = Math.max(1, Math.min(perStrand, Number(probeLitLedsPerStrand) | 0));
 
-		RGBData[(strand - 1) * 3] = 255;
-		RGBData[(strand - 1) * 3 + 1] = 255;
-		RGBData[(strand - 1) * 3 + 2] = 255;
+		const colourCount = StrandCount * perStrand;
+		const RGBData = new Array(colourCount * 3).fill(0);
+
+		const firstOnStrand = (strand - 1) * perStrand;
+
+		for(let i = 0; i < lit; i++){
+			const at = (firstOnStrand + i) * 3;
+			RGBData[at] = 255;
+			RGBData[at + 1] = 255;
+			RGBData[at + 2] = 255;
+		}
 
 		const packet = this.createDreamViewPacket(RGBData);
 
 		if(renderCount % 120 === 0){
 			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
-			device.log(`Probe: lighting strand ${strand} of ${StrandCount}, frame ${packet.length} bytes.`);
+			device.log(`Probe: strand ${strand}, lighting ${lit} of ${perStrand} per strand, `
+				+ `${colourCount} colours sent, frame ${packet.length} bytes.`);
 			device.log(`Probe frame: ${hex.length > 320 ? `${hex.slice(0, 320)}...` : hex}`);
 		}
 
