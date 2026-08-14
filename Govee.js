@@ -15,8 +15,6 @@ TurnOffOnShutdown:readonly
 protocolSelect:readonly
 probeEnabled:readonly
 probeStrand:readonly
-probeUnitsPerStrand:readonly
-probeLitPerStrand:readonly
 */
 export function ControllableParameters() {
 	return [
@@ -30,10 +28,8 @@ export function ControllableParameters() {
 		// actually addresses on a device -- a single LED, a whole strand, or a zone spanning
 		// several. Bypasses channels and components entirely so a dark result cannot be blamed
 		// on component configuration.
-		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Replaces normal rendering with a lit strand, to work out what the device can actually address.", type:"boolean", default:"false"},
-		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand to light, 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
-		{property:"probeUnitsPerStrand", group:"settings", label:"Probe: Units Per Strand", description: "TEMPORARY. Frame declares 20 x this many units. At 1 the device gets 20 units, one per strand. Above 1 tests whether extra units subdivide a strand.", type:"number", min:"1", max:"12", default:"1", step:"1"},
-		{property:"probeLitPerStrand", group:"settings", label:"Probe: Lit Units On That Strand", description: "TEMPORARY. How many of the chosen strand's units are lit. Only meaningful when Units Per Strand is above 1.", type:"number", min:"1", max:"12", default:"1", step:"1"},
+		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Lights one strand white and everything else black, to check which strand is which.", type:"boolean", default:"false"},
+		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand lights up. 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 	];
 }
 
@@ -41,6 +37,9 @@ export function ControllableParameters() {
 let govee;
 
 const UnknownSkuLedCount = 120;
+
+/** Strands on the H70BC curtain. Only used by the temporary probe. */
+const StrandCount = 20;
 
 /** Channels this device renders through, in the order their colors go on the wire.
  * @type {{name: string, ledCount: number}[]} */
@@ -755,40 +754,25 @@ class GoveeProtocol {
 
 	// TEMPORARY. Remove with the probe properties.
 	//
-	// The H70BC has 20 hanging strands. At 20 units one unit lights one whole strand, so there is
-	// nothing finer to address; "LEDs on a strand" only becomes meaningful if declaring more than
-	// 20 units subdivides them. probeUnitsPerStrand tests that: the frame declares
-	// 20 x probeUnitsPerStrand units, and probeLitPerStrand of the chosen strand's units are lit.
+	// Sends one colour per strand: white for the chosen strand, black for the other 19. Every
+	// strand is written every frame, so nothing can linger from a previous frame if the device
+	// holds onto state -- that was making several strands appear lit at once.
 	//
-	// Every unit in the frame is always written, so the device receives a complete picture each
-	// time. A partial frame would let previously lit strands persist if the device latches state,
-	// which reads as several strands lighting at once and is easy to mistake for a mapping quirk.
-	//
-	// RGBData is built by hand rather than from channels, so the wire protocol is isolated from
-	// the canvas mapping -- a wrong result cannot be blamed on component setup.
+	// Colours are built by hand rather than read from the canvas, so this tests the device and
+	// the packet only, with the component layout out of the picture.
 	SendProbeFrame(){
-		const perStrand = Math.max(1, Math.min(12, Number(probeUnitsPerStrand) | 0));
-		const strand = Math.max(1, Math.min(20, Number(probeStrand) | 0));
-		const lit = Math.max(1, Math.min(perStrand, Number(probeLitPerStrand) | 0));
+		const strand = Math.max(1, Math.min(StrandCount, Number(probeStrand) | 0));
+		const RGBData = new Array(StrandCount * 3).fill(0);
 
-		const unitCount = 20 * perStrand;
-		const RGBData = new Array(unitCount * 3).fill(0);
-
-		const firstUnit = (strand - 1) * perStrand;
-
-		for(let i = 0; i < lit; i++){
-			const unit = (firstUnit + i) * 3;
-			RGBData[unit] = 255;
-			RGBData[unit + 1] = 255;
-			RGBData[unit + 2] = 255;
-		}
+		RGBData[(strand - 1) * 3] = 255;
+		RGBData[(strand - 1) * 3 + 1] = 255;
+		RGBData[(strand - 1) * 3 + 2] = 255;
 
 		const packet = this.createDreamViewPacket(RGBData);
 
 		if(renderCount % 120 === 0){
 			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
-			device.log(`Probe: strand ${strand}, ${perStrand} unit(s)/strand, ${lit} lit, `
-				+ `units ${firstUnit}-${firstUnit + lit - 1} of ${unitCount}, frame ${packet.length} bytes.`);
+			device.log(`Probe: lighting strand ${strand} of ${StrandCount}, frame ${packet.length} bytes.`);
 			device.log(`Probe frame: ${hex.length > 320 ? `${hex.slice(0, 320)}...` : hex}`);
 		}
 
