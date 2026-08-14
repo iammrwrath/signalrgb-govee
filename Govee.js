@@ -17,6 +17,7 @@ probeEnabled:readonly
 probeStrand:readonly
 probeLedsPerStrand:readonly
 probeLitLedsPerStrand:readonly
+probePattern:readonly
 probeModeByte:readonly
 */
 export function ControllableParameters() {
@@ -35,7 +36,8 @@ export function ControllableParameters() {
 		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand lights up. 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 		{property:"probeLedsPerStrand", group:"settings", label:"Probe: LEDs Per Strand", description: "TEMPORARY. How many colours we send per strand. 1 lights whole strands. Above 1 tests whether the device will split a strand.", type:"number", min:"1", max:"20", default:"1", step:"1"},
 		{property:"probeLitLedsPerStrand", group:"settings", label:"Probe: Lit LEDs Per Strand", description: "TEMPORARY. How much of the chosen strand lights. Only does anything when LEDs Per Strand is above 1.", type:"number", min:"1", max:"20", default:"1", step:"1"},
-		{property:"probeModeByte", group:"settings", label:"Probe: Mode Byte", description: "TEMPORARY. The byte before the colour count. We have always sent 1. The device may treat 1 as a gradient, which would explain neighbouring strands lighting dimly. Try 0, 2, 3.", type:"number", min:"0", max:"8", default:"1", step:"1"},
+		{property:"probePattern", group:"settings", label:"Probe: Pattern", description: "TEMPORARY. One Strand checks which strand is which. Two Stops puts red on strand 1 and blue on strand 3, so strand 2 shows whether the device blends between colours. Rainbow gives all 20 strands a different hue.", type:"combobox", values:["One Strand", "Two Stops", "Rainbow"], default:"One Strand"},
+		{property:"probeModeByte", group:"settings", label:"Probe: Byte 4", description: "TEMPORARY. The byte before the colour count, which we have always sent as 1. Zero and non-zero render differently but we do not know what the field means. Try 0 and 1 against each pattern.", type:"number", min:"0", max:"8", default:"1", step:"1"},
 	];
 }
 
@@ -46,6 +48,22 @@ const UnknownSkuLedCount = 120;
 
 /** Strands on the H70BC curtain. Only used by the temporary probe. */
 const StrandCount = 20;
+
+/** Fully saturated colour for a hue in degrees. Only used by the temporary probe's rainbow. */
+function HueToRgb(hue){
+	const h = ((hue % 360) + 360) % 360;
+	const x = 1 - Math.abs(((h / 60) % 2) - 1);
+
+	let rgb = [1, x, 0];
+
+	if(h >= 60 && h < 120){ rgb = [x, 1, 0]; }
+	else if(h >= 120 && h < 180){ rgb = [0, 1, x]; }
+	else if(h >= 180 && h < 240){ rgb = [0, x, 1]; }
+	else if(h >= 240 && h < 300){ rgb = [x, 0, 1]; }
+	else if(h >= 300){ rgb = [1, 0, x]; }
+
+	return rgb.map((v) => Math.round(v * 255));
+}
 
 /** Channels this device renders through, in the order their colors go on the wire.
  * @type {{name: string, ledCount: number}[]} */
@@ -765,20 +783,26 @@ class GoveeProtocol {
 
 	// TEMPORARY. Remove with the probe properties.
 	//
-	// Two experiments in one:
+	// Three patterns, because a single white strand against black is the least informative thing
+	// we can send -- it cannot tell "discrete" apart from several other behaviours, and black is
+	// ambiguous between "off" and "interpolating towards off".
 	//
-	//   LEDs Per Strand = 1  -> 20 colours sent, one per strand. Lights whole strands. Known to
-	//                           work: picking a strand lights that strand.
-	//   LEDs Per Strand > 1  -> more than 20 colours sent, so each strand gets a share of them.
-	//                           If the device honours that, Lit LEDs Per Strand lights only part
-	//                           of the chosen strand. If it does not, expect nothing or nonsense,
-	//                           which tells us the device only ever does whole strands.
+	//   One Strand   the chosen strand white, rest black. Confirms which strand is which.
+	//   Two Stops    strand 1 red, strand 3 blue, rest black. Strand 2 is the tell: blended
+	//                purple means the device interpolates between colours, dark means it does
+	//                not. Two known colours with a gap, so nothing hinges on reading black.
+	//   Rainbow      all 20 strands a distinct hue. Proves the whole mapping in one look,
+	//                including order and any off-by-one.
 	//
-	// Every colour in the frame is written every time, so nothing lingers from the previous frame
-	// if the device holds state -- that was making several strands appear lit at once.
+	// Byte 4 of the frame is exposed as probeModeByte. Observed: 0 gives discrete strands, 1 puts
+	// a ramp on the preceding strand, and anything above 1 behaves like 1. That last part means it
+	// is not a bit flag -- 2 would clear bit 0 and behave like 0 if it were. So it is a zero
+	// versus non-zero test in firmware and its actual meaning is still unknown. "Mode" is a label,
+	// not a finding.
 	//
-	// Colours are built by hand rather than read from the canvas, so this tests the device and the
-	// packet only, with the component layout out of the picture.
+	// Every colour is written every frame, so nothing lingers if the device holds state, and the
+	// colours are built by hand rather than read from the canvas, so this tests the device and the
+	// packet only with the component layout out of the picture.
 	SendProbeFrame(){
 		const perStrand = Math.max(1, Math.min(20, Number(probeLedsPerStrand) | 0));
 		const strand = Math.max(1, Math.min(StrandCount, Number(probeStrand) | 0));
@@ -787,13 +811,32 @@ class GoveeProtocol {
 		const colourCount = StrandCount * perStrand;
 		const RGBData = new Array(colourCount * 3).fill(0);
 
-		const firstOnStrand = (strand - 1) * perStrand;
+		const paint = (index, rgb) => {
+			const at = index * 3;
 
-		for(let i = 0; i < lit; i++){
-			const at = (firstOnStrand + i) * 3;
-			RGBData[at] = 255;
-			RGBData[at + 1] = 255;
-			RGBData[at + 2] = 255;
+			if(at + 2 >= RGBData.length){
+				return;
+			}
+
+			RGBData[at] = rgb[0];
+			RGBData[at + 1] = rgb[1];
+			RGBData[at + 2] = rgb[2];
+		};
+
+		if(probePattern === "Two Stops"){
+			// Strand 1 red, strand 3 blue. Strand 2 is deliberately left unset.
+			paint(0, [255, 0, 0]);
+			paint(2 * perStrand, [0, 0, 255]);
+		}else if(probePattern === "Rainbow"){
+			for(let s = 0; s < StrandCount; s++){
+				paint(s * perStrand, HueToRgb((s * 360) / StrandCount));
+			}
+		}else{
+			const firstOnStrand = (strand - 1) * perStrand;
+
+			for(let i = 0; i < lit; i++){
+				paint(firstOnStrand + i, [255, 255, 255]);
+			}
 		}
 
 		const mode = Math.max(0, Math.min(255, Number(probeModeByte) | 0));
@@ -801,8 +844,8 @@ class GoveeProtocol {
 
 		if(renderCount % 120 === 0){
 			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
-			device.log(`Probe: strand ${strand}, lighting ${lit} of ${perStrand} per strand, `
-				+ `${colourCount} colours sent, mode byte ${mode}, frame ${packet.length} bytes.`);
+			device.log(`Probe [${probePattern}]: strand ${strand}, lighting ${lit} of ${perStrand} per strand, `
+				+ `${colourCount} colours sent, byte4 ${mode}, frame ${packet.length} bytes.`);
 			device.log(`Probe frame: ${hex.length > 320 ? `${hex.slice(0, 320)}...` : hex}`);
 		}
 
