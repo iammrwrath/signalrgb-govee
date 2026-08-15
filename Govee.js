@@ -14,12 +14,6 @@ forcedColor:readonly
 TurnOffOnShutdown:readonly
 protocolSelect:readonly
 blendSegments:readonly
-probeEnabled:readonly
-probeStrand:readonly
-probeLedsPerStrand:readonly
-probeLitLedsPerStrand:readonly
-probePattern:readonly
-probeModeByte:readonly
 */
 export function ControllableParameters() {
 	return [
@@ -29,17 +23,6 @@ export function ControllableParameters() {
 		{property:"TurnOffOnShutdown", group:"settings", label:"Turn off on unlink process", description: "This turns off the device during the unlink/disabling of the device process or shutdown of the app", type:"boolean", default:"false"},
 		{property:"protocolSelect", group:"settings", label:"Protocol", description: "Determines which protocol will be used to control the device. Auto picks the best protocol this device is known to support, and is the right choice unless you're troubleshooting. (Not all protocols works on a device)", type:"combobox", values:["Auto", "Dreamview", "RazerV1", "RazerV2", "Static"], default:"Auto"},
 		{property:"blendSegments", group:"settings", label:"Blend Between Segments", description: "Lets the device fade between the colors we send instead of applying each one to its own segment. Auto follows what the device library says. Softer on a strip, wrong on anything built from separate physical pieces like a curtain, where it blends across a gap that is not there in the light.", type:"combobox", values:["Auto", "On", "Off"], default:"Auto"},
-
-		// TEMPORARY protocol probe. Remove before release. Answers what a DreamView "unit"
-		// actually addresses on a device -- a single LED, a whole strand, or a zone spanning
-		// several. Bypasses channels and components entirely so a dark result cannot be blamed
-		// on component configuration.
-		{property:"probeEnabled", group:"settings", label:"Protocol Probe", description: "TEMPORARY. Lights one strand white and everything else black, to check which strand is which.", type:"boolean", default:"false"},
-		{property:"probeStrand", group:"settings", label:"Probe: Strand", description: "TEMPORARY. Which strand lights up. 1 to 20.", type:"number", min:"1", max:"20", default:"1", step:"1"},
-		{property:"probeLedsPerStrand", group:"settings", label:"Probe: LEDs Per Strand", description: "TEMPORARY. How many colours we send per strand. 1 lights whole strands. Above 1 tests whether the device will split a strand.", type:"number", min:"1", max:"20", default:"1", step:"1"},
-		{property:"probeLitLedsPerStrand", group:"settings", label:"Probe: Lit LEDs Per Strand", description: "TEMPORARY. How much of the chosen strand lights. Only does anything when LEDs Per Strand is above 1.", type:"number", min:"1", max:"20", default:"1", step:"1"},
-		{property:"probePattern", group:"settings", label:"Probe: Pattern", description: "TEMPORARY. One Strand checks which strand is which. Two Stops puts red on strand 1 and blue on strand 3. Red, One Blue fills every strand red except the chosen one, which is the real test of whether the device blends between two colours. Rainbow gives all 20 strands a different hue.", type:"combobox", values:["One Strand", "Two Stops", "Red, One Blue", "Rainbow"], default:"One Strand"},
-		{property:"probeModeByte", group:"settings", label:"Probe: Byte 4", description: "TEMPORARY. The byte before the colour count, which we have always sent as 1. Zero and non-zero render differently but we do not know what the field means. Try 0 and 1 against each pattern.", type:"number", min:"0", max:"8", default:"1", step:"1"},
 	];
 }
 
@@ -47,25 +30,6 @@ export function ControllableParameters() {
 let govee;
 
 const UnknownSkuLedCount = 120;
-
-/** Strands on the H70BC curtain. Only used by the temporary probe. */
-const StrandCount = 20;
-
-/** Fully saturated colour for a hue in degrees. Only used by the temporary probe's rainbow. */
-function HueToRgb(hue){
-	const h = ((hue % 360) + 360) % 360;
-	const x = 1 - Math.abs(((h / 60) % 2) - 1);
-
-	let rgb = [1, x, 0];
-
-	if(h >= 60 && h < 120){ rgb = [x, 1, 0]; }
-	else if(h >= 120 && h < 180){ rgb = [0, 1, x]; }
-	else if(h >= 180 && h < 240){ rgb = [0, x, 1]; }
-	else if(h >= 240 && h < 300){ rgb = [x, 0, 1]; }
-	else if(h >= 300){ rgb = [1, 0, x]; }
-
-	return rgb.map((v) => Math.round(v * 255));
-}
 
 /** Channels this device renders through, in the order their colors go on the wire.
  * @type {{name: string, ledCount: number}[]} */
@@ -753,8 +717,6 @@ class GoveeProtocol {
 	// them applied as given, and on a curtain the bleed crosses a physical gap between strands that
 	// does not exist in the light. Whatever the field is really called, we want the version that
 	// does not smear our pixels.
-	//
-	// Overridable so the probe can sweep it.
 	createDreamViewPacket(colors, mode = 0x00) {
 		// Define the Dreamview protocol header
 
@@ -861,100 +823,9 @@ class GoveeProtocol {
 		return componentChannel.getColors("Inline");
 	}
 
-	// TEMPORARY. Remove with the probe properties.
-	//
-	// Three patterns, because a single white strand against black is the least informative thing
-	// we can send -- it cannot tell "discrete" apart from several other behaviours, and black is
-	// ambiguous between "off" and "interpolating towards off".
-	//
-	//   One Strand   the chosen strand white, rest black. Confirms which strand is which.
-	//   Two Stops    strand 1 red, strand 3 blue, rest black. Strand 2 is the tell: blended
-	//                purple means the device interpolates between colours, dark means it does
-	//                not. Two known colours with a gap, so nothing hinges on reading black.
-	//   Rainbow      all 20 strands a distinct hue. Proves the whole mapping in one look,
-	//                including order and any off-by-one.
-	//
-	// Byte 4 of the frame is exposed as probeModeByte. Observed: 0 gives discrete strands, 1 puts
-	// a ramp on the preceding strand, and anything above 1 behaves like 1. That last part means it
-	// is not a bit flag -- 2 would clear bit 0 and behave like 0 if it were. So it is a zero
-	// versus non-zero test in firmware and its actual meaning is still unknown. "Mode" is a label,
-	// not a finding.
-	//
-	// Every colour is written every frame, so nothing lingers if the device holds state, and the
-	// colours are built by hand rather than read from the canvas, so this tests the device and the
-	// packet only with the component layout out of the picture.
-	SendProbeFrame(){
-		const perStrand = Math.max(1, Math.min(20, Number(probeLedsPerStrand) | 0));
-		const strand = Math.max(1, Math.min(StrandCount, Number(probeStrand) | 0));
-		const lit = Math.max(1, Math.min(perStrand, Number(probeLitLedsPerStrand) | 0));
-
-		const colourCount = StrandCount * perStrand;
-		const RGBData = new Array(colourCount * 3).fill(0);
-
-		const paint = (index, rgb) => {
-			const at = index * 3;
-
-			if(at + 2 >= RGBData.length){
-				return;
-			}
-
-			RGBData[at] = rgb[0];
-			RGBData[at + 1] = rgb[1];
-			RGBData[at + 2] = rgb[2];
-		};
-
-		if(probePattern === "Two Stops"){
-			// Strand 1 red, strand 3 blue, strand 2 left at black.
-			//
-			// Note this cannot show a red-to-blue blend: strand 2's slot is not a gap, it is a
-			// black stop, so a device that interpolates ramps black to blue across it rather than
-			// red to blue. Kept because that is still a useful signal, but "Red, One Blue" is the
-			// pattern that actually tests blending between two colours.
-			paint(0, [255, 0, 0]);
-			paint(2 * perStrand, [0, 0, 255]);
-		}else if(probePattern === "Red, One Blue"){
-			// Every strand red except the chosen one, which is blue. No black anywhere, so the
-			// strands either side of the blue one have red and blue as neighbouring stops. A
-			// device that blends must show purple there; one that does not shows hard edges.
-			for(let s = 0; s < StrandCount; s++){
-				paint(s * perStrand, [255, 0, 0]);
-			}
-
-			paint((strand - 1) * perStrand, [0, 0, 255]);
-		}else if(probePattern === "Rainbow"){
-			for(let s = 0; s < StrandCount; s++){
-				paint(s * perStrand, HueToRgb((s * 360) / StrandCount));
-			}
-		}else{
-			const firstOnStrand = (strand - 1) * perStrand;
-
-			for(let i = 0; i < lit; i++){
-				paint(firstOnStrand + i, [255, 255, 255]);
-			}
-		}
-
-		const mode = Math.max(0, Math.min(255, Number(probeModeByte) | 0));
-		const packet = this.createDreamViewPacket(RGBData, mode);
-
-		if(renderCount % 120 === 0){
-			const hex = packet.map((b) => (b & 0xff).toString(16).padStart(2, "0")).join(" ");
-			device.log(`Probe [${probePattern}]: strand ${strand}, lighting ${lit} of ${perStrand} per strand, `
-				+ `${colourCount} colours sent, byte4 ${mode}, frame ${packet.length} bytes.`);
-			device.log(`Probe frame: ${hex.length > 320 ? `${hex.slice(0, 320)}...` : hex}`);
-		}
-
-		this.SendEncodedPacket(packet);
-	}
-
 	SendRGB(overrideColor) {
 		let RGBData = [];
 		let packet  = [];
-
-		if(probeEnabled){
-			this.SendProbeFrame();
-
-			return;
-		}
 
 		// Segments go on the wire in channel order, matching how the device chains them.
 		for(const channel of channels){
