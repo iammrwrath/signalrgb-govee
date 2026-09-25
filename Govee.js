@@ -2,7 +2,6 @@ import udp from "@SignalRGB/udp";
 export function Name() { return "Govee"; }
 export function Version() { return "1.0.0"; }
 export function Type() { return "network"; }
-export function DeviceType() { return "Lighting"; }
 export function Publisher() { return "WhirlwindFX"; }
 export function Size() { return [70, 1]; }
 export function SubdeviceController() { return true; }
