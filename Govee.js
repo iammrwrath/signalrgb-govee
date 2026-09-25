@@ -2,8 +2,9 @@ import udp from "@SignalRGB/udp";
 export function Name() { return "Govee"; }
 export function Version() { return "1.0.0"; }
 export function Type() { return "network"; }
+export function DeviceType() { return "Lighting"; }
 export function Publisher() { return "WhirlwindFX"; }
-export function Size() { return [22, 1]; }
+export function Size() { return [70, 1]; }
 export function SubdeviceController() { return true; }
 /* global
 controller:readonly
@@ -254,6 +255,15 @@ function ConfigureChannels(layout){
 	}
 
 	device.SetLedLimit(totalLedCount);
+
+	if(device.setSize !== undefined){
+		device.setSize([totalLedCount, 1]);
+	}
+	if(device.setLedPosition !== undefined){
+		for(let i = 0; i < totalLedCount; i++){
+			device.setLedPosition(i, [i, 0]);
+		}
+	}
 }
 
 // -------------------------------------------<( Discovery Service )>--------------------------------------------------
@@ -1757,5 +1767,14 @@ const GoveeDeviceLibrary = {
 		supportRazer: false,
 		supportDreamView: true,
 		ledCount: 20
+	},
+	H808A: {
+		name: "Gaming Desk Light Strip (5m)",
+		deviceImage: "https://assets.signalrgb.com/devices/brands/govee/wifi/h61c2.png",
+		sku: "H808A",
+		state: 1,
+		supportDreamView: true,
+		supportRazer: true,
+		ledCount: 70
 	},
 };
